@@ -6,19 +6,22 @@ Created on Thu Sep  4 20:31:13 2014
 """
 from gzip import open as opengz
 from json import dumps as json_dumps
-from numpy import asfarray, dot, c_, mean, exp, sqrt, any, isnan, asarray
-from numpy.linalg import svd
+from numpy import asfarray, dot, c_, mean, exp, sqrt, any, isnan, asarray, array, zeros, linspace, full
+from numpy.linalg import svd, inv
 from numpy.random import randn
+from skimage import transform
 import math
+
+
+from waypointShared import (ref, fitHomography, corners, DEFAULT_ref)
+
 
 DEFAULT_MSG_TEMPLATE = {
     0 : [[2016, 1070], [1993, 1091], [2022, 1115], [2044, 1093]],
     1 : [[1822, 1323], [1824, 1287], [1787, 1281], [1784, 1315]],
     2 : [[1795, 911], [1766, 894], [1749, 916], [1779, 933]],
     3 : [[1451, 876], [1428, 896], [1454, 917], [1476, 896]],
-    #4 : [[1374, 1278], [1410, 1268], [1399, 1236], [1364, 1243]],
-    4 : [[1409, 1278], [1409, 1243], [1374, 1243], [1374, 1278]],
-    #4  : [[2276, 1179], [2311, 1171], [2309, 1206], [2273, 1204]],
+    4 : [[1374, 1278], [1410, 1268], [1399, 1236], [1364, 1243]],
     22 : [[1744, 622], [1743, 646], [1774, 650], [1774, 626]],
     23 : [[2274, 1171], [2312, 1177], [2306, 1146], [2271, 1141]],
     24 : [[1100, 975], [1110, 946], [1077, 938], [1066, 966]],
@@ -27,7 +30,10 @@ DEFAULT_MSG_TEMPLATE = {
     27 : [[2230, 697], [2230, 721], [2262, 727], [2260, 704]],
     28 : [[911, 1525], [952, 1523], [953, 1483], [913, 1486]],
     29 : [[1222, 542], [1193, 537], [1186, 558], [1216, 566]],
+    666 : [[10, 10], [-10, 10], [-10, -10], [10, -10]] # hail satan
 }
+
+
 try:
   from randArenaOutput import MSG_TEMPLATE, randSeed
   print("### Using randomly generated arena from seed %d" % randSeed)
@@ -105,7 +111,7 @@ class RobotSimInterface( object ):
           arrays of the tag corners
     """
     # Initialize dummy values into robot and arena state
-    self.tagPos = asfarray(MSG_TEMPLATE[ ROBOT_TAGID[0]])
+    self.tagPos = asfarray(MSG_TEMPLATE[4])
     self.laserAxis = dot([[1,1,0,0],[0,0,1,1]],self.tagPos)/2
     self.waypoints = { tid : asfarray(MSG_TEMPLATE[tid]) for tid in waypoints }
     ### Initialize internal variables
@@ -210,94 +216,156 @@ class RobotSimInterface( object ):
 class SimpleRobotSim( RobotSimInterface ):
     def __init__(self, *args, **kw):
         RobotSimInterface.__init__(self, *args, **kw)
+
+        # calculate the homography matrix
+        self.homomatrix = self.calHomography()
+
+        # make the tag a square
         self.dNoise = 0.1 # Distance noise
         self.aNoise = 0.02 # Angle noise
         self.lNoise = 0.01 # Laser pointing noise
         
-        # make the tag a square
-        fix_pos = self.squareUp(self.tagPos)
+        self.lineUp()
+        self.laserAxis = dot([[1,1,0,0],[0,0,1,1]],self.tagPos)/2
+               
+        # tag with respect to arena
+        self.tagPosArena = self.transformToArena(self.tagPos)
+        tagArena = dot(self.tagPosArena, [1.0, 1.0j])
+        self.zTagArena = tagArena-mean(tagArena)
+        self.posArena = mean(tagArena)
 
-        # Model the tag
-        tag = dot(fix_pos,[1,1j])
+        # tag with respect to camera
+        tag = dot(self.tagPos,[1.0,1.0j])
         self.zTag = tag-mean(tag)
         self.pos = mean(tag)
         self.ang = 1+0j
         self.tang = 0+1j
 
+    def lineUp(self):
+        # transform the spawn position into arena coors
+        robot_pos_arena = self.transformToArena(self.tagPos)
+
+        robot_width = 5
+        robot_pos_arena[0][0] = 100# round(robot_pos_arena[0][0])
+        robot_pos_arena[0][1] = 50 #round(robot_pos_arena[0][1])
         
-    def squareUp(self, tag):
-        # resizes the tag to be square
-        tag_height = 35
-        tag_width = 35
+        robot_pos_arena[1][0] = 100 - robot_width#round(robot_pos_arena[1][0])
+        robot_pos_arena[1][1] = 50 #robot_pos_arena[0][1]
 
-        left_corner_x = tag[0][0]
-        left_corner_y = tag[0][1]
+        robot_pos_arena[2][0] = 100 - robot_width #robot_pos_arena[1][0]
+        robot_pos_arena[2][1] = 50 + robot_width #round(robot_pos_arena[2][1])
 
-        tag[0][0] = left_corner_x
-        tag[0][1] = left_corner_y 
+        robot_pos_arena[3][0] = 100 #robot_pos_arena[0][0]
+        robot_pos_arena[3][1] = 50 + robot_width #robot_pos_arena[2][1]
 
+        # transform to the camera view
+        self.tagPos = self.transformToCamera(robot_pos_arena)
+        return
 
-        tag[1][0] = left_corner_x + tag_width
-        tag[1][1] = left_corner_y
+    def calHomography(self):
+        """
+        Used to calculate the homography matrix
+        Returns the homography matrix
 
-        tag[2][0] = left_corner_x + tag_width
-        tag[2][1] = left_corner_y + tag_height
+        Only called once
+        """
+        h = zeros((8,3),dtype=float)
 
+        # TODO: make more 'pythony'
 
-        tag[3][0] = left_corner_x
-        tag[3][1] = left_corner_y + tag_height
+        # find corners of the arena in terms of the camera perspective
+        for nm in range(len(corners)):
 
+          corner = array(MSG_TEMPLATE[corners[nm]])
 
-        return tag
+          h[nm][0] = mean(corner[:,0])/100
+          h[nm][1] = mean(corner[:,1])/100
+
+          # this is needed to make it a homogeneous coordinate
+          # cartesian -> homogenous (just add a 1 )
+          h[nm][2] = 1
+
+        # Homography mapping roi to ref
+        return fitHomography( h, DEFAULT_ref)
+
+    def transformToArena(self, camera_coor):
+      """
+      Transfroms from camera coordinates to arena coordinates
+
+      Returns points with arena coordinates
+      """
+      # Robot location with respect to the camera is in self.tagPos
+      # take the average of the of the tags to get the middle of the robot
+      starting_spot = zeros((4,3),dtype=float)
+
+      # TODO: make more pythony
+      for i in range(4):
+        starting_spot[i][0] = camera_coor[i][0] / 100
+        starting_spot[i][1] = camera_coor[i][1] / 100
+        starting_spot[i][2] = 1
+
+      trans = dot(starting_spot, self.homomatrix)
+
+      # trans is now arena location of the robot
+      arr = zeros((4,2),dtype=float)
+      arr[:,0] = trans[:,0] / trans[:,2]
+      arr[:,1] = trans[:,1] / trans[:,2]
+        
+      # find the middle point
+      x = mean(arr[:,0])
+      y = mean(arr[:,1])
+
+      return arr
+
+    def transformToCamera(self, arena_coor):
+      """
+      Transfroms from arena coordinates to camera coordinates
+
+      Returns points with camera coordinates
+      """
+      # starting point
+      starting_spot = zeros((4,3),dtype=float)
+
+      # TODO: make more pythony
+      for i in range(4):
+        starting_spot[i][0] = arena_coor[i][0]
+        starting_spot[i][1] = arena_coor[i][1]
+        starting_spot[i][2] = 1
+
+      trans = dot(starting_spot, inv(self.homomatrix))
+
+      arr = zeros((4,2),dtype=float)
+      arr[:,0] = trans[:,0] / trans[:,2]
+      arr[:,1] = trans[:,1] / trans[:,2]
+
+      arr = arr*100 # need the scaler
+
+      return arr
 
     def move(self,dist):
         # Move in direction of self.ang
         #  If we assume Gaussian errors in velocity, distance error will grow
         #  as sqrt of goal distance
-        self.pos += dist*self.ang #+ randn()*self.dNoise*sqrt(abs(dist))
+        self.posArena += dist*self.tang #+ randn()*self.dNoise*sqrt(abs(dist))
 
+    def get_x(self):
+      return self.posArena.real
 
-    def turn(self,ang):
+    def get_y(self):
+      return self.posArena.imag
+
+    def turn(self,dist):
         # Turn by ang (plus noise)
-        self.pos += ang*self.tang
+        self.posArena += dist*self.ang
 
     def refreshState(self):
-        # Compute tag points relative to tag center, with 1st point on real axis
-        tag = self.zTag  + self.pos #  *self.ang
+        # Compute tag points relative to tag center
+        tagArena = self.zTagArena  + self.posArena #  *self.ang
+
         # New tag position is set by position and angle
-        self.tagPos = c_[tag.real,tag.imag]
-        
+        self.tagPosArena = c_[tagArena.real,tagArena.imag]
+        self.tagPos = self.transformToCamera(self.tagPosArena)
 
-        print(self.tagPos)
+        # TODO: draw the laser
 
-        #Laser axis is based on tag and turret
-        c = mean(tag) # center
-        r = mean(abs(tag-c))
-        ax = self.ang
-
-        self.laserAxis = [
-            [c.real,c.imag],[(c+ax).real, (c+ax).imag]
-        ]
-
-
-        vl = c + asarray([0,ax*100*r])
-        # Start a new visual in robot subplot
-        self.visRobotClear()
-        # plot command in robot subplot,
-        #   '~' prefix changes coordinates using homography
-        self.visRobot('~plot',
-            [int(v) for v in vl.real],
-            [int(v) for v in vl.imag],
-            c='g')
-
-        # Start a new visual in arena subplot
-        self.visArenaClear()
-        # plot command in arena subplot,
-        #   '~' prefix changes coordinates using homography
-        self.visArena('~plot',
-            [int(v) for v in vl.real],
-            [int(v) for v in vl.imag],
-            c='g',alpha=0.5)
-        # We can call any plot axis class methods, e.g. grid
-        #self.visArena('grid',1)
-
+        return

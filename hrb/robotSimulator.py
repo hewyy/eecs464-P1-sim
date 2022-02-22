@@ -64,7 +64,6 @@ class Turn(Plan):
       s.turn(step)
       yield self.forDuration(dt)
 
-
 class RobotSimulatorApp( JoyApp ):
   """Concrete class RobotSimulatorApp <<singleton>>
      A JoyApp which runs the DummyRobotSim robot model in simulation, and
@@ -121,6 +120,8 @@ class RobotSimulatorApp( JoyApp ):
     else:
       progress( "Waypoints: << no reading >>" )
 
+    progress("current-x: " + str(self.robSim.get_x()) + ", current-y: " + str(self.robSim.get_y()))
+
   def emitTagMessage( self ):
     """Generate and emit and update simulated tagStreamer message"""
     #### DO NOT MODIFY --- it WILL break the simulator
@@ -145,21 +146,24 @@ class RobotSimulatorApp( JoyApp ):
     #### MODIFY FROM HERE ON ----------------------------------------
     if evt.type == KEYDOWN:
       if evt.key == K_UP and not self.moveP.isRunning():
-        self.moveP.dist = 100.0
+        self.moveP.dist = 10.0
         self.moveP.start()
         return progress("(say) Move forward")
       elif evt.key == K_DOWN and not self.moveP.isRunning():
-        self.moveP.dist = -100.0
+        self.moveP.dist = -10.0
         self.moveP.start()
         return progress("(say) Move back")
       if evt.key == K_LEFT and not self.turnP.isRunning():
-        self.turnP.dist = 50.0
+        self.turnP.dist = -10.0
         self.turnP.start()
         return progress("(say) Turn left")
       if evt.key == K_RIGHT and not self.turnP.isRunning():
-        self.turnP.dist = -50.0
+        self.turnP.dist = 10.0
         self.turnP.start()
         return progress("(say) Turn right")
+      if evt.key == K_a and not self.turnP.isRunning() and not self.moveP.isRunning():
+        progress("start autonomous mode")
+        #TODO
     ### DO NOT MODIFY -----------------------------------------------
       else:# Use superclass to show any other events
         return JoyApp.onEvent(self,evt)

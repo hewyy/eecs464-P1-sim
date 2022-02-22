@@ -197,7 +197,7 @@ def _animation(f1):
         progress('Unknown dict in msg: %r' % d)
     #
     # at this point, all observed tag locations are in the dictionary h
-    #
+
     ### Update pts array
     #
     # Tags seen in this frame
@@ -216,7 +216,7 @@ def _animation(f1):
     # Print indicator telling operator what we did
     progress( "%7.2f %5d  "% (now()-T0,nmsg) + ''.join(lbl[didx+2*lidx+4*fidx])
              , sameLine = True )
-    #
+    
     # Collect the corner tags and estimate homography
     nprj = None
     try:
@@ -234,14 +234,15 @@ def _animation(f1):
         continue
       progress("(say) Homography initialized")
     prj = nprj
-    #
     # Apply homography to all the points
     #progress(">>>!!! raw:" + repr(pts[ROBOT_TAGID]))
+    
     uvs = dot(pts,prj)
     z = uvs[...,0] + 1j*uvs[...,1]
     nz = ~isnan(z[:,0])
     nz &= asarray(uvs[:,0,-1],dtype=bool)
     z[nz,...] /= uvs[nz,...,[-1]]
+    
     # Centroids of tags
     zc = mean(z,1)
     #progress(">>>!!! zc:" + repr(zc[ROBOT_TAGID]))

@@ -222,11 +222,11 @@ class SimpleRobotSim( RobotSimInterface ):
     # FIXME
     def movey(self,dist):
         # Move in direction of y axis
-        self.pos += -dist + randn()*self.dNoise*sqrt(abs(dist))
+        self.pos += -dist #+ randn()*self.dNoise*sqrt(abs(dist))
         
     def movex(self,dist):
         # Move in direction of y axis
-        self.pos += 1j*dist + randn()*self.dNoise*sqrt(abs(dist))
+        self.pos += 1j*dist #+ randn()*self.dNoise*sqrt(abs(dist))
 
     def refreshState(self):
         # Compute tag points relative to tag center, with 1st point on real axis
