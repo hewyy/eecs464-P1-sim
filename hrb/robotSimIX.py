@@ -213,6 +213,7 @@ class RobotSimInterface( object ):
       self.out.write("%.2f, 1, %d, %d\n" % (now,x[0],x[1]))
     return "Laser: %d,%d " % tuple(x)
 
+
 class SimpleRobotSim( RobotSimInterface ):
     def __init__(self, *args, **kw):
         RobotSimInterface.__init__(self, *args, **kw)
@@ -367,5 +368,6 @@ class SimpleRobotSim( RobotSimInterface ):
         self.tagPos = self.transformToCamera(self.tagPosArena)
 
         # TODO: draw the laser
+        
 
         return
